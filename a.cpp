@@ -15,6 +15,8 @@ c_some_class::m_some_member c_foo::some_func()  t_some_type
 
 using namespace std;
 
+using boost::any_cast;
+
 // nodes.at(0).AddTask(make_shared<cTask>(e_task_ask_price,'Z'));
 
 // ==================================================================
@@ -32,8 +34,8 @@ template<typename T> const T& get_front(const std::vector<T> & container) {
 // ==================================================================
 
 typedef enum {
-	e_task_ask_price,
-	e_task_tell_price,
+	e_task_ask_price, // what is price that you want for sending my package
+	e_task_tell_price, // this is reply to above -^
 } t_task;
 
 struct cTask;
@@ -44,8 +46,15 @@ struct cTask {
 	cTask(t_task kind, char name1);
 
 	void Print(ostream &out) const;
+	
+	bool operator==(const cTask & other) const;
 };
 typedef shared_ptr<cTask> tTaskPtr; ///< some pointer to task
+
+bool cTask::operator==(const cTask & other) const {
+	return (this->mTaskKind == other.mTaskKind)
+	 && (this->mName1 == other.mName1);
+}
 
 void cTask::Print(ostream &out) const {
 	out << "{";
@@ -124,6 +133,10 @@ struct cNode : std::enable_shared_from_this<cNode> {
 	void receive_msg(const c_msg & msg); ///< place it in inbox
 
 	void react_message(const c_msg & msg); 
+
+	cTopic& find_topic_for_task(const cTask &); ///< finds (or creates) proper Topic for such task
+
+	bool integrate_task(shared_ptr<cTask> new_task); ///< Adds this task to proper topic, unless it's not needed. Returns 1 if was in fact added
  
 	
 };
@@ -199,7 +212,8 @@ void cNode::Tick() { ///< Run a tick of the simulation
 	// loop with possible deletion:
 	for(auto it = mTopic.begin() ; it != mTopic.end() ; ) {  // for each my topic
 		if (! ((*it)->mTask.size()) ) { // no tasks in this topic - must be done
-			it = mTopic.erase( it ); // remove current
+	//		it = mTopic.erase( it ); // remove current
+			++it;
 		}
 		else { // normal operation
 			tTopicPtr & topic = *it; // the operator
@@ -220,18 +234,63 @@ void cNode::Tick() { ///< Run a tick of the simulation
 	}
 }
 
+cTopic& cNode::find_topic_for_task(const cTask &) {
+	// TODO
+	if (mTopic.size() == 0) {
+		cerr << " *** new topic opened *** " << (void*) this  << endl;
+		cerr << mTopic.size() << endl;
+		shared_ptr<cTopic> new_topic = make_shared<cTopic>();
+		mTopic.push_back( new_topic ); // new topic
+		cerr << mTopic.size() << endl;
+	}
+	cerr << "in find_topic_for_task " << mTopic.size() << endl;
+	return * mTopic.at(0);
+}
+
+bool cNode::integrate_task(shared_ptr<cTask> new_task) {
+	auto topic = find_topic_for_task(*new_task);
+	cerr << "AFTER find_topic_for_task " << mTopic.size() << endl;
+
+	bool contains_this_task=0;
+	for(const auto & t : topic.mTask) {
+		if ((*t) == (*new_task)) {  // check if has identical
+			contains_this_task=1; break; 
+		}
+	}
+	cerr << "integrate.. contains_this_task="<<contains_this_task << endl;
+	if (contains_this_task) return 0; // <--- ret - has identical
+	// else in fact add it:
+	cerr << "tasks in topic: " << topic.mTask.size() << endl;
+	topic.mTask.push_back(new_task);
+	cerr << "tasks in topic: " << topic.mTask.size() << endl;
+	cerr << mName << " : " << ((void*)this) << " " << topic.mTask.size() << endl;
+	Print();
+	return 1;
+}
+
 void cNode::react_message(const c_msg & msg) {
+//	cerr << " *** react_message *** " << endl;
 	switch (msg.m_kind) {
 		case e_msg_task: 
 		{
 			switch (msg.m_kind_task) {
 				case e_task_ask_price:
+					auto new_task = make_shared<cTask>(
+						e_task_ask_price, // it is our task to find out the price
+						any_cast<char>( msg.m_data.at(0) )
+					);
+					integrate_task( new_task ); // add the task
 				break;
+
+	//			default: ;
 			} // m_kind_task
+
+//			default: ;
 		} // e_msg_task - the message type is some task
 
 		break;
 	}
+	Print(); cerr<<"^--- after reaction" << endl;
 }
 
 void cNode::topic_tick(cTopic &topic) { ///< Tick for the selected topic
@@ -241,7 +300,7 @@ void cNode::topic_tick(cTopic &topic) { ///< Tick for the selected topic
 
 	switch (task.mTaskKind)  {
 		case e_task_ask_price: 
-			cerr<<"Ask price..."<<endl;
+//			cerr<<"Ask price..."<<endl;
 			if (task.mName1 == mName) { // I'm the goal of this question cool
 				if (mNodePrev) { // we have the node who asked us
 					c_msg msg;
@@ -303,6 +362,7 @@ int main(int argc, const char** argv) {
 	cout << "=== START ====================================" << endl;
 	vector<shared_ptr<cNode>> nodes; // the world
 
+
 	// build world
 	nodes.push_back( make_shared<cNode>('A',10) );
 	for (int ix=1; ix<6-1; ++ix) {
@@ -312,10 +372,12 @@ int main(int argc, const char** argv) {
 	nodes.push_back( make_shared<cNode>('Z',10) );
 	(*(nodes.end()-1 -1))->ConnectNext( nodes.back() );
 
+	return 0;
+
 	// start tasks
 	nodes.at(0)->TopicAdd(make_shared<cTask>(e_task_ask_price,'Z'));
 
-	for (int i=0; i<10; ++i) { // main loop
+	for (int i=0; i<3; ++i) { // main loop
 		cout << endl << endl;
 		cout << "=== turn # " << i << endl;
 
