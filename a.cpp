@@ -107,8 +107,8 @@ typedef shared_ptr<cNode> tNodePtr; ///< some pointer to other nodes
 struct cNode : std::enable_shared_from_this<cNode> {
 	char mName;
 
-	tNodePtr mNodePrev;
-	tNodePtr mNodeNext;
+	weak_ptr<cNode> mNodePrev;
+	weak_ptr<cNode> mNodeNext;
 
 	int m_price_route;
 
@@ -119,7 +119,7 @@ struct cNode : std::enable_shared_from_this<cNode> {
 	cNode(char name, int price=10);
 	void Draw() const;
 	void Print() const;
-	void ConnectNext(tNodePtr other);
+	void ConnectNext(shared_ptr<cNode> other);
 
 	void Tick(); ///< Run a tick of the simulation
 	void topic_tick(cTopic &topic); ///< Tick for the selected topic
@@ -152,7 +152,7 @@ void network_send(cNode &from, cNode &to, c_msg &msg) {
 
 cNode::cNode(char name, int price) 
 	: mName(name),
-	mNodePrev(nullptr), mNodeNext(nullptr),
+	mNodePrev(), mNodeNext(),
 	m_price_route(price)
 { }
 
@@ -160,30 +160,33 @@ void cNode::Draw() const {
 	ostream &out = cout;
 	const bool show_arrow_detail = 0;
 
-	if (mNodePrev) {
+	auto prev = mNodePrev.lock(); 	auto next = mNodeNext.lock();
+
+	if (prev) {
 		out << "<";
-		if (show_arrow_detail) out << mNodePrev->mName; 
+		if (show_arrow_detail) out << prev->mName; 
 		out << "--";
 	}
 	out << "["<<mName<<"]";
-	if (mNodeNext) {
+	if (next) {
 		out << "--";
-		if (show_arrow_detail) out << mNodeNext->mName; 
+		if (show_arrow_detail) out << next->mName; 
 		out << ">";
 	}
 }
 
 void cNode::Print() const {
 	ostream &out = cout;
+	auto prev = mNodePrev.lock(); 	auto next = mNodeNext.lock();
 
 	out << "--- " << mName << " ---" << endl;
 	
 	out << "Prev: ";
-	if (mNodePrev) out << mNodePrev->mName; else out << "(none)";
+	if (prev) out << prev->mName; else out << "(none)";
 	out << "\n";
 
 	out << "Next: ";
-	if (mNodeNext) out << mNodeNext->mName; else out << "(none)";
+	if (next) out << next->mName; else out << "(none)";
 	out << "\n";
 
 
@@ -194,7 +197,6 @@ void cNode::Print() const {
 			objptr->Print(out);
 		}
 	}
-	
 
 	out<<"\n\n";
 }
@@ -203,7 +205,7 @@ void cNode::Print() const {
 
 //void ConnectPrev(tNodePtr other) { mNodePrev = other; }
 
-void cNode::ConnectNext(tNodePtr other) { 
+void cNode::ConnectNext(shared_ptr<cNode> other) { 
 	mNodeNext = other; 
 	other->mNodePrev = shared_from_this();
 }
@@ -282,12 +284,17 @@ void cNode::react_message(const c_msg & msg) {
 					integrate_task( new_task ); // add the task
 				break;
 
-	//			default: ;
+				default: break;
+
 			} // m_kind_task
 
 //			default: ;
 		} // e_msg_task - the message type is some task
 
+		break;
+
+		default: 
+		int x=42;
 		break;
 	}
 	Print(); cerr<<"^--- after reaction" << endl;
@@ -298,29 +305,31 @@ void cNode::topic_tick(cTopic &topic) { ///< Tick for the selected topic
 	
 	cTask & task = * get_front(topic.mTask); // the first task of it
 
+	auto prev = mNodePrev.lock(); 	auto next = mNodeNext.lock();
+
 	switch (task.mTaskKind)  {
 		case e_task_ask_price: 
 //			cerr<<"Ask price..."<<endl;
 			if (task.mName1 == mName) { // I'm the goal of this question cool
-				if (mNodePrev) { // we have the node who asked us
+				if (prev) { // we have the node who asked us
 					c_msg msg;
 					msg.m_kind = e_msg_task;
 					msg.m_kind_task = e_task_tell_price; // we are sending REPLY
 					msg.m_data.push_back( char(task.mName1) ); // data: name again
 					msg.m_data.push_back( m_price_route ); // data: the price
-					mNodePrev->receive_msg(msg);
+					prev->receive_msg(msg);
 				}
 				else {
 					cerr<<"\n*** Protocol warning: we got a request, but no prev node to reply to***\n";
 				}
 			}
 			else { // I'm not the goal
-				if (mNodeNext) { // we have next node to ask
+				if (next) { // we have next node to ask
 					c_msg msg;
 					msg.m_kind = e_msg_task;
 					msg.m_kind_task = e_task_ask_price;
 					msg.m_data.push_back( char(task.mName1) ); // data with name
-					mNodeNext->receive_msg(msg);
+					next->receive_msg(msg);
 				} // ask other node
 				else { // no one else to ask
 					cerr<<"\n*** Can not find the goal ***\n";
@@ -365,14 +374,15 @@ int main(int argc, const char** argv) {
 
 	// build world
 	nodes.push_back( make_shared<cNode>('A',10) );
+
 	for (int ix=1; ix<6-1; ++ix) {
 		nodes.push_back( make_shared<cNode>('A'+ix,10) );
-		nodes.at(ix-1)->ConnectNext( nodes.back() );
+	//	nodes.at(ix-1)->ConnectNext( nodes.back() );
 	}
+	return 0;
 	nodes.push_back( make_shared<cNode>('Z',10) );
 	(*(nodes.end()-1 -1))->ConnectNext( nodes.back() );
 
-	return 0;
 
 	// start tasks
 	nodes.at(0)->TopicAdd(make_shared<cTask>(e_task_ask_price,'Z'));

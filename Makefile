@@ -6,4 +6,5 @@ a.bin: a.cpp
 
 run: a.bin
 	valgrind --leak-check=full --show-leak-kinds=all	 ./a.bin
+	# ./a.bin
 
