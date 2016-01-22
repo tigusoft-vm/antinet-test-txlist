@@ -8,8 +8,20 @@
 
 /*
 
-TODO: move all to coding style lower_case_underscore with markers c_ t_
-c_some_class::m_some_member c_foo::some_func()  t_some_type 
+A -> B -> C -> D -> Z
+
+send packet
+  (get_price)
+  ask_price  ----> offer_price
+    todo             (get next hop price)
+    wait             ask_price
+                       todo -----------------> offer_price
+                       wait                    my_price      
+                       done <-----------------
+                     tell_price
+                        50+10
+    done <------------ todo
+
 
 */
 
@@ -38,9 +50,25 @@ typedef enum {
 	e_task_tell_price, // this is reply to above -^
 } t_task;
 
-struct c_task;
-struct c_task {
+typedef enum {
+	e_state_done=0, ///< this task is done
+	e_state_todo=1, ///< this task is pending [the usual/first step of] execution
+
+	// for e_task_ask_price:
+	// todo - task will be sent
+	e_state_ask_price_STATE_wait, ///< now waiting for reply
+	// done
+
+	// for e_task_tell_price:
+	// todo 
+	// done
+
+} t_state;
+
+class c_task;
+class c_task {
 	t_task m_task_kind; ///< current task
+	t_state m_state; ///<  state of this task
 	char m_name1; ///< one of paramters for the task
 
 	c_task(t_task kind, char name1);
@@ -48,6 +76,7 @@ struct c_task {
 	void print(ostream &out) const;
 	
 	bool operator==(const c_task & other) const;
+	bool is_done() const { return m_state == e_state_done; }
 };
 typedef shared_ptr<c_task> tTaskPtr; ///< some pointer to task
 
@@ -67,7 +96,7 @@ void c_task::print(ostream &out) const {
 }
 
 c_task::c_task(t_task kind, char name1) 
-: m_task_kind(kind), m_name1(name1) { }
+: m_task_kind(kind), m_state(e_state_todo), m_name1(name1) { }
 
 
 // ==================================================================
@@ -78,8 +107,13 @@ struct c_topic {
 };
 typedef shared_ptr<c_topic> tTopicPtr; ///< some pointer to other nodes
 
+ostream& operator<<(ostream& oss, const c_topic & obj) {
+	obj.print(oss);
+	return oss;
+}
+
 void c_topic::print(ostream &out) const {
-	out << "{ ";
+	out << " TOPIC (at"<<(void*)this<<") with " << mTask.size()<<" tasks: { ";
 	for (const tTaskPtr & objptr : mTask) { 
 		objptr->print(out);
 		out << " "; // endl?
@@ -189,7 +223,6 @@ void c_node::print() const {
 	if (next) out << next->m_name; else out << "(none)";
 	out << "\n";
 
-
 	out << "Topics: ";
 	if (!mTopic.size()) out << "(none)" ; else {
 		for (const auto & objptr : mTopic) { 
@@ -214,17 +247,16 @@ void c_node::tick() { ///< Run a tick of the simulation
 	// loop with possible deletion:
 	for(auto it = mTopic.begin() ; it != mTopic.end() ; ) {  // for each my topic
 		if (! ((*it)->mTask.size()) ) { // no tasks in this topic - must be done
-	//		it = mTopic.erase( it ); // remove current
-			++it;
+			it = mTopic.erase( it ); // remove current
 		}
-		else { // normal operation
+		else { // topic has something to do
 			tTopicPtr & topic = *it; // the operator
 			topic_tick( *topic ); // work on the topic
 			++it; // increasing it now
 		}
 	}
 
-	// read any new tasks from my inbox:
+	// read any new tasks from my inbox - and react
 	for(auto it = m_inbox.begin() ; it != m_inbox.end() ; ) { // foreach+delete
 		try {
 			react_message(*it);
@@ -237,37 +269,28 @@ void c_node::tick() { ///< Run a tick of the simulation
 }
 
 c_topic& c_node::find_topic_for_task(const c_task &) {
-	// TODO
+	// TODO more advanced
 	if (mTopic.size() == 0) {
-		cerr << " *** new topic opened *** " << (void*) this  << endl;
-		cerr << mTopic.size() << endl;
 		shared_ptr<c_topic> new_topic = make_shared<c_topic>();
 		mTopic.push_back( new_topic ); // new topic
-		cerr << mTopic.size() << endl;
 	}
-	cerr << "in find_topic_for_task " << mTopic.size() << endl;
-	return * mTopic.at(0);
+	shared_ptr<c_topic> new_topic = make_shared<c_topic>();
+	mTopic.push_back( new_topic );
+	return * mTopic.back(); // return the just added topic; MEM:our object owns it (pins it)
 }
 
 bool c_node::integrate_task(shared_ptr<c_task> new_task) {
-	auto topic = find_topic_for_task(*new_task);
-	cerr << "AFTER find_topic_for_task " << mTopic.size() << endl;
-
+	auto & topic = find_topic_for_task(*new_task);
 	bool contains_this_task=0;
 	for(const auto & t : topic.mTask) {
 		if ((*t) == (*new_task)) {  // check if has identical
 			contains_this_task=1; break; 
 		}
 	}
-	cerr << "integrate.. contains_this_task="<<contains_this_task << endl;
 	if (contains_this_task) return 0; // <--- ret - has identical
 	// else in fact add it:
-	cerr << "tasks in topic: " << topic.mTask.size() << endl;
 	topic.mTask.push_back(new_task);
-	cerr << "tasks in topic: " << topic.mTask.size() << endl;
-	cerr << m_name << " : " << ((void*)this) << " " << topic.mTask.size() << endl;
-	print();
-	return 1;
+	return 1; // no problem
 }
 
 void c_node::react_message(const c_msg & msg) {
@@ -292,13 +315,14 @@ void c_node::react_message(const c_msg & msg) {
 
 		default: { } break; // other values of msg.m_kind
 	} // switch msg.m_kind
-	print(); cerr<<"^--- after reaction" << endl;
+	// print(); cerr<<"^--- after reaction" << endl;
 }
 
 void c_node::topic_tick(c_topic &topic) { ///< tick for the selected topic
 	if (!topic.mTask.size()) return ; // nothing to do for this topic
 	
-	c_task & task = * get_front(topic.mTask); // the first task of it
+	auto tasks_front = get_front(topic.mTask); // the first task of it - iterator
+	if (tasks_front->is_done())
 
 	auto prev = m_node_prev.lock(); 	auto next = m_node_next.lock();
 
@@ -306,7 +330,7 @@ void c_node::topic_tick(c_topic &topic) { ///< tick for the selected topic
 		case e_task_ask_price: {
 			auto & goal_name = task.m_name1;
 			if (goal_name == m_name) { // I'm the goal of this question cool
-				if (prev) { // we have the node who asked us
+				if (prev) { // we have the node who asked us so we can reply to them
 					c_msg msg;
 					msg.m_kind = e_msg_task;
 					msg.m_kind_task = e_task_tell_price; // we are sending REPLY
@@ -324,7 +348,8 @@ void c_node::topic_tick(c_topic &topic) { ///< tick for the selected topic
 					msg.m_kind = e_msg_task;
 					msg.m_kind_task = e_task_ask_price;
 					msg.m_data.push_back( char(task.m_name1) ); // data with name
-					next->receive_msg(msg);
+					next->receive_msg(msg); // <--- ask them
+					task.m_state = e_state_done;
 				} // ask other node
 				else { // no one else to ask
 					cerr<<"\n*** Can not find the goal, in " << m_name << " " << (void*)this
@@ -349,8 +374,8 @@ void clear_screen() {
 	system("clear");
 };
 
-void sleep(int ms) {
-	std::this_thread::sleep_for( std::chrono::milliseconds(1000) );
+void sleep_seconds(double ms) {
+	std::this_thread::sleep_for( std::chrono::milliseconds( (long int)(ms*1000)  ) );
 }
 
 
@@ -399,7 +424,7 @@ int main(int argc, const char** argv) {
 		// simulate world...
 		for (shared_ptr<c_node> &node_shared : nodes) node_shared->tick();
 
-		sleep(400);
+		sleep_seconds(5.0);
 
 	} // main loop
 
