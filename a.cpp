@@ -38,50 +38,50 @@ typedef enum {
 	e_task_tell_price, // this is reply to above -^
 } t_task;
 
-struct cTask;
-struct cTask {
-	t_task mTaskKind; ///< current task
-	char mName1; ///< one of paramters for the task
+struct c_task;
+struct c_task {
+	t_task m_task_kind; ///< current task
+	char m_name1; ///< one of paramters for the task
 
-	cTask(t_task kind, char name1);
+	c_task(t_task kind, char name1);
 
-	void Print(ostream &out) const;
+	void print(ostream &out) const;
 	
-	bool operator==(const cTask & other) const;
+	bool operator==(const c_task & other) const;
 };
-typedef shared_ptr<cTask> tTaskPtr; ///< some pointer to task
+typedef shared_ptr<c_task> tTaskPtr; ///< some pointer to task
 
-bool cTask::operator==(const cTask & other) const {
-	return (this->mTaskKind == other.mTaskKind)
-	 && (this->mName1 == other.mName1);
+bool c_task::operator==(const c_task & other) const {
+	return (this->m_task_kind == other.m_task_kind)
+	 && (this->m_name1 == other.m_name1);
 }
 
-void cTask::Print(ostream &out) const {
+void c_task::print(ostream &out) const {
 	out << "{";
-	switch (mTaskKind)  {
-		case e_task_ask_price: out << "ask price route-to-" << mName1; break;
-		case e_task_tell_price: out << "tell price route-to" << mName1; break;
+	switch (m_task_kind)  {
+		case e_task_ask_price: out << "ask price route-to-" << m_name1; break;
+		case e_task_tell_price: out << "tell price route-to" << m_name1; break;
 		default: out << "(invalid)";
 	}
 	out << "}";
 }
 
-cTask::cTask(t_task kind, char name1) 
-: mTaskKind(kind), mName1(name1) { }
+c_task::c_task(t_task kind, char name1) 
+: m_task_kind(kind), m_name1(name1) { }
 
 
 // ==================================================================
 
-struct cTopic {
+struct c_topic {
 	vector<tTaskPtr> mTask; ///< list of my tasks
-	void Print(ostream &out) const;
+	void print(ostream &out) const;
 };
-typedef shared_ptr<cTopic> tTopicPtr; ///< some pointer to other nodes
+typedef shared_ptr<c_topic> tTopicPtr; ///< some pointer to other nodes
 
-void cTopic::Print(ostream &out) const {
+void c_topic::print(ostream &out) const {
 	out << "{ ";
 	for (const tTaskPtr & objptr : mTask) { 
-		objptr->Print(out);
+		objptr->print(out);
 		out << " "; // endl?
 	}
 	out << "}";
@@ -101,14 +101,14 @@ struct c_msg {
 
 // === Node =========================================================
 
-struct cNode;
-typedef shared_ptr<cNode> tNodePtr; ///< some pointer to other nodes
+struct c_node;
+typedef shared_ptr<c_node> tNodePtr; ///< some pointer to other nodes
 
-struct cNode : std::enable_shared_from_this<cNode> {
-	char mName;
+struct c_node : std::enable_shared_from_this<c_node> {
+	char m_name;
 
-	weak_ptr<cNode> mNodePrev;
-	weak_ptr<cNode> mNodeNext;
+	weak_ptr<c_node> m_node_prev;
+	weak_ptr<c_node> m_node_next;
 
 	int m_price_route;
 
@@ -116,16 +116,16 @@ struct cNode : std::enable_shared_from_this<cNode> {
 
 	vector< c_msg > m_inbox; ///< data that I received
 
-	cNode(char name, int price=10);
-	void Draw() const;
-	void Print() const;
-	void ConnectNext(shared_ptr<cNode> other);
+	c_node(char name, int price=10);
+	void draw() const;
+	void print() const;
+	void connect_next(shared_ptr<c_node> other);
 
-	void Tick(); ///< Run a tick of the simulation
-	void topic_tick(cTopic &topic); ///< Tick for the selected topic
+	void tick(); ///< Run a tick of the simulation
+	void topic_tick(c_topic &topic); ///< tick for the selected topic
 
-	void TopicAdd(tTaskPtr task) {
-		tTopicPtr topic = make_shared<cTopic>();
+	void topic_add(tTaskPtr task) {
+		tTopicPtr topic = make_shared<c_topic>();
 		mTopic.push_back(topic);
 		topic->mTask.push_back(task);
 	}
@@ -134,9 +134,9 @@ struct cNode : std::enable_shared_from_this<cNode> {
 
 	void react_message(const c_msg & msg); 
 
-	cTopic& find_topic_for_task(const cTask &); ///< finds (or creates) proper Topic for such task
+	c_topic& find_topic_for_task(const c_task &); ///< finds (or creates) proper Topic for such task
 
-	bool integrate_task(shared_ptr<cTask> new_task); ///< Adds this task to proper topic, unless it's not needed. Returns 1 if was in fact added
+	bool integrate_task(shared_ptr<c_task> new_task); ///< Adds this task to proper topic, unless it's not needed. Returns 1 if was in fact added
  
 	
 };
@@ -144,49 +144,49 @@ struct cNode : std::enable_shared_from_this<cNode> {
 
 // === Network ======================================================
 
-void network_send(cNode &from, cNode &to, c_msg &msg) {
+void network_send(c_node &from, c_node &to, c_msg &msg) {
 	to.receive_msg( msg );
 }
 
 // --- Node (continue) ----------------------------------------------
 
-cNode::cNode(char name, int price) 
-	: mName(name),
-	mNodePrev(), mNodeNext(),
+c_node::c_node(char name, int price) 
+	: m_name(name),
+	m_node_prev(), m_node_next(),
 	m_price_route(price)
 { }
 
-void cNode::Draw() const {
+void c_node::draw() const {
 	ostream &out = cout;
 	const bool show_arrow_detail = 0;
 
-	auto prev = mNodePrev.lock(); 	auto next = mNodeNext.lock();
+	auto prev = m_node_prev.lock(); 	auto next = m_node_next.lock();
 
 	if (prev) {
 		out << "<";
-		if (show_arrow_detail) out << prev->mName; 
+		if (show_arrow_detail) out << prev->m_name; 
 		out << "--";
 	}
-	out << "["<<mName<<"]";
+	out << "["<<m_name<<"]";
 	if (next) {
 		out << "--";
-		if (show_arrow_detail) out << next->mName; 
+		if (show_arrow_detail) out << next->m_name; 
 		out << ">";
 	}
 }
 
-void cNode::Print() const {
+void c_node::print() const {
 	ostream &out = cout;
-	auto prev = mNodePrev.lock(); 	auto next = mNodeNext.lock();
+	auto prev = m_node_prev.lock(); 	auto next = m_node_next.lock();
 
-	out << "--- " << mName << " ---" << endl;
+	out << "--- " << m_name << " ---" << endl;
 	
 	out << "Prev: ";
-	if (prev) out << prev->mName; else out << "(none)";
+	if (prev) out << prev->m_name; else out << "(none)";
 	out << "\n";
 
 	out << "Next: ";
-	if (next) out << next->mName; else out << "(none)";
+	if (next) out << next->m_name; else out << "(none)";
 	out << "\n";
 
 
@@ -194,7 +194,7 @@ void cNode::Print() const {
 	if (!mTopic.size()) out << "(none)" ; else {
 		for (const auto & objptr : mTopic) { 
 			out << endl << "* " ;
-			objptr->Print(out);
+			objptr->print(out);
 		}
 	}
 
@@ -203,14 +203,14 @@ void cNode::Print() const {
 
 
 
-//void ConnectPrev(tNodePtr other) { mNodePrev = other; }
+//void ConnectPrev(tNodePtr other) { m_node_prev = other; }
 
-void cNode::ConnectNext(shared_ptr<cNode> other) { 
-	mNodeNext = other; 
-	other->mNodePrev = shared_from_this();
+void c_node::connect_next(shared_ptr<c_node> other) { 
+	m_node_next = other; 
+	other->m_node_prev = shared_from_this();
 }
 
-void cNode::Tick() { ///< Run a tick of the simulation
+void c_node::tick() { ///< Run a tick of the simulation
 	// loop with possible deletion:
 	for(auto it = mTopic.begin() ; it != mTopic.end() ; ) {  // for each my topic
 		if (! ((*it)->mTask.size()) ) { // no tasks in this topic - must be done
@@ -236,12 +236,12 @@ void cNode::Tick() { ///< Run a tick of the simulation
 	}
 }
 
-cTopic& cNode::find_topic_for_task(const cTask &) {
+c_topic& c_node::find_topic_for_task(const c_task &) {
 	// TODO
 	if (mTopic.size() == 0) {
 		cerr << " *** new topic opened *** " << (void*) this  << endl;
 		cerr << mTopic.size() << endl;
-		shared_ptr<cTopic> new_topic = make_shared<cTopic>();
+		shared_ptr<c_topic> new_topic = make_shared<c_topic>();
 		mTopic.push_back( new_topic ); // new topic
 		cerr << mTopic.size() << endl;
 	}
@@ -249,7 +249,7 @@ cTopic& cNode::find_topic_for_task(const cTask &) {
 	return * mTopic.at(0);
 }
 
-bool cNode::integrate_task(shared_ptr<cTask> new_task) {
+bool c_node::integrate_task(shared_ptr<c_task> new_task) {
 	auto topic = find_topic_for_task(*new_task);
 	cerr << "AFTER find_topic_for_task " << mTopic.size() << endl;
 
@@ -265,57 +265,52 @@ bool cNode::integrate_task(shared_ptr<cTask> new_task) {
 	cerr << "tasks in topic: " << topic.mTask.size() << endl;
 	topic.mTask.push_back(new_task);
 	cerr << "tasks in topic: " << topic.mTask.size() << endl;
-	cerr << mName << " : " << ((void*)this) << " " << topic.mTask.size() << endl;
-	Print();
+	cerr << m_name << " : " << ((void*)this) << " " << topic.mTask.size() << endl;
+	print();
 	return 1;
 }
 
-void cNode::react_message(const c_msg & msg) {
-//	cerr << " *** react_message *** " << endl;
+void c_node::react_message(const c_msg & msg) {
 	switch (msg.m_kind) {
-		case e_msg_task: 
+		case e_msg_task: // a message to create task 
 		{
-			switch (msg.m_kind_task) {
-				case e_task_ask_price:
-					auto new_task = make_shared<cTask>(
+		 	switch (msg.m_kind_task) {
+
+				case e_task_ask_price: {
+					auto new_task = make_shared<c_task>(
 						e_task_ask_price, // it is our task to find out the price
 						any_cast<char>( msg.m_data.at(0) )
 					);
 					integrate_task( new_task ); // add the task
-				break;
+				}	break;
 
-				default: break;
-
-			} // m_kind_task
-
-//			default: ;
-		} // e_msg_task - the message type is some task
-
+				default: { } break; // other values of msg.m_kind_task
+			} // switch msg.m_kind_task
+			
+		} break; // e_msg_task - the message type is some task
 		break;
 
-		default: 
-		int x=42;
-		break;
-	}
-	Print(); cerr<<"^--- after reaction" << endl;
+		default: { } break; // other values of msg.m_kind
+	} // switch msg.m_kind
+	print(); cerr<<"^--- after reaction" << endl;
 }
 
-void cNode::topic_tick(cTopic &topic) { ///< Tick for the selected topic
+void c_node::topic_tick(c_topic &topic) { ///< tick for the selected topic
 	if (!topic.mTask.size()) return ; // nothing to do for this topic
 	
-	cTask & task = * get_front(topic.mTask); // the first task of it
+	c_task & task = * get_front(topic.mTask); // the first task of it
 
-	auto prev = mNodePrev.lock(); 	auto next = mNodeNext.lock();
+	auto prev = m_node_prev.lock(); 	auto next = m_node_next.lock();
 
-	switch (task.mTaskKind)  {
-		case e_task_ask_price: 
-//			cerr<<"Ask price..."<<endl;
-			if (task.mName1 == mName) { // I'm the goal of this question cool
+	switch (task.m_task_kind)  {
+		case e_task_ask_price: {
+			auto & goal_name = task.m_name1;
+			if (goal_name == m_name) { // I'm the goal of this question cool
 				if (prev) { // we have the node who asked us
 					c_msg msg;
 					msg.m_kind = e_msg_task;
 					msg.m_kind_task = e_task_tell_price; // we are sending REPLY
-					msg.m_data.push_back( char(task.mName1) ); // data: name again
+					msg.m_data.push_back( char(task.m_name1) ); // data: name again
 					msg.m_data.push_back( m_price_route ); // data: the price
 					prev->receive_msg(msg);
 				}
@@ -328,32 +323,33 @@ void cNode::topic_tick(cTopic &topic) { ///< Tick for the selected topic
 					c_msg msg;
 					msg.m_kind = e_msg_task;
 					msg.m_kind_task = e_task_ask_price;
-					msg.m_data.push_back( char(task.mName1) ); // data with name
+					msg.m_data.push_back( char(task.m_name1) ); // data with name
 					next->receive_msg(msg);
 				} // ask other node
 				else { // no one else to ask
-					cerr<<"\n*** Can not find the goal ***\n";
+					cerr<<"\n*** Can not find the goal, in " << m_name << " " << (void*)this
+						<< "the goal is: " << goal_name << endl;
 				}
 			} // I'm not the goal
-		break;
+		} break; // task e_task_ask_price
 
-		case e_task_tell_price:
-		break;
+		case e_task_tell_price: {
+		} break;
 	}
 }
 
-void cNode::receive_msg( const c_msg & msg ) {
+void c_node::receive_msg( const c_msg & msg ) {
 	m_inbox.push_back(msg);
 }
 
 // ==================================================================
 // ==================================================================
 
-void ClearScreen() {
+void clear_screen() {
 	system("clear");
 };
 
-void Sleep(int ms) {
+void sleep(int ms) {
 	std::this_thread::sleep_for( std::chrono::milliseconds(1000) );
 }
 
@@ -366,35 +362,34 @@ int main(int argc, const char** argv) {
 		if (str=="--simple") opt_run_simple=1;
 	}
 
-	if (opt_run_simple) ClearScreen(); // goes well with loop.sh
+	if (opt_run_simple) clear_screen(); // goes well with loop.sh
 
 	cout << "=== START ====================================" << endl;
-	vector<shared_ptr<cNode>> nodes; // the world
+	vector<shared_ptr<c_node>> nodes; // the world
 
 
 	// build world
-	nodes.push_back( make_shared<cNode>('A',10) );
+	nodes.push_back( make_shared<c_node>('A',10) );
 
 	for (int ix=1; ix<6-1; ++ix) {
-		nodes.push_back( make_shared<cNode>('A'+ix,10) );
-	//	nodes.at(ix-1)->ConnectNext( nodes.back() );
+		nodes.push_back( make_shared<c_node>('A'+ix,10) );
+		nodes.at(ix-1)->connect_next( nodes.back() );
 	}
-	return 0;
-	nodes.push_back( make_shared<cNode>('Z',10) );
-	(*(nodes.end()-1 -1))->ConnectNext( nodes.back() );
+	nodes.push_back( make_shared<c_node>('Z',10) );
+	(*(nodes.end()-1 -1))->connect_next( nodes.back() );
 
 
 	// start tasks
-	nodes.at(0)->TopicAdd(make_shared<cTask>(e_task_ask_price,'Z'));
+	nodes.at(0)->topic_add(make_shared<c_task>(e_task_ask_price,'Z'));
 
-	for (int i=0; i<3; ++i) { // main loop
+	for (int i=0; i<5; ++i) { // main loop
 		cout << endl << endl;
 		cout << "=== turn # " << i << endl;
 
 		// draw world
-		for (shared_ptr<cNode> &node_shared : nodes) node_shared->Draw();
+		for (shared_ptr<c_node> &node_shared : nodes) node_shared->draw();
 		cout<<endl;
-		for (shared_ptr<cNode> &node_shared : nodes) node_shared->Print();
+		for (shared_ptr<c_node> &node_shared : nodes) node_shared->print();
 
 		if (opt_run_simple) { 
 			cout << endl << "It was SIMPLE run, ending" << endl;
@@ -402,9 +397,9 @@ int main(int argc, const char** argv) {
 		}
 
 		// simulate world...
-		for (shared_ptr<cNode> &node_shared : nodes) node_shared->Tick();
+		for (shared_ptr<c_node> &node_shared : nodes) node_shared->tick();
 
-		Sleep(400);
+		sleep(400);
 
 	} // main loop
 
