@@ -5,6 +5,7 @@
 #include <thread>
 #include <boost/any.hpp>
 #include <stdexcept>
+#include <cassert>
 
 /*
 
@@ -16,7 +17,7 @@ send packet
     todo             (get next hop price)
     wait             ask_price
                        todo -----------------> offer_price
-                       wait                    my_price      
+                       wait                    my_price
                        done <-----------------
                      tell_price
                         50+10
@@ -33,14 +34,16 @@ using boost::any_cast;
 
 // ==================================================================
 
-template<typename T> T& get_front(std::vector<T> & container) {
+template<typename T> typename T::value_type & get_front(T & container) {
 	if (!container.size()) throw std::overflow_error("Trying to get_front of empty container");
 	return container.front();
 }
 
-template<typename T> const T& get_front(const std::vector<T> & container) {
-	if (!container.size()) throw std::overflow_error("Trying to get_front of empty container");
-	return container.front();
+template<typename T> typename T::iterator get_begin_notempty(T & container) {
+	if (!container.size()) throw std::overflow_error("Trying to get begin of empty container");
+	auto it = container.begin();
+	assert(it != container.end());
+	return it;
 }
 
 // ==================================================================
@@ -60,23 +63,25 @@ typedef enum {
 	// done
 
 	// for e_task_tell_price:
-	// todo 
+	// todo
 	// done
 
 } t_state;
 
 class c_task;
 class c_task {
-	t_task m_task_kind; ///< current task
-	t_state m_state; ///<  state of this task
-	char m_name1; ///< one of paramters for the task
+	public:
 
-	c_task(t_task kind, char name1);
+		t_task m_task_kind; ///< current task
+		t_state m_state; ///<  state of this task
+		char m_name1; ///< one of paramters for the task
 
-	void print(ostream &out) const;
-	
-	bool operator==(const c_task & other) const;
-	bool is_done() const { return m_state == e_state_done; }
+		c_task(t_task kind, char name1);
+
+		void print(ostream &out) const;
+
+		bool operator==(const c_task & other) const;
+		bool is_done() const { return m_state == e_state_done; }
 };
 typedef shared_ptr<c_task> tTaskPtr; ///< some pointer to task
 
@@ -95,7 +100,7 @@ void c_task::print(ostream &out) const {
 	out << "}";
 }
 
-c_task::c_task(t_task kind, char name1) 
+c_task::c_task(t_task kind, char name1)
 : m_task_kind(kind), m_state(e_state_todo), m_name1(name1) { }
 
 
@@ -114,7 +119,7 @@ ostream& operator<<(ostream& oss, const c_topic & obj) {
 
 void c_topic::print(ostream &out) const {
 	out << " TOPIC (at"<<(void*)this<<") with " << mTask.size()<<" tasks: { ";
-	for (const tTaskPtr & objptr : mTask) { 
+	for (const tTaskPtr & objptr : mTask) {
 		objptr->print(out);
 		out << " "; // endl?
 	}
@@ -157,6 +162,7 @@ struct c_node : std::enable_shared_from_this<c_node> {
 
 	void tick(); ///< Run a tick of the simulation
 	void topic_tick(c_topic &topic); ///< tick for the selected topic
+	c_task* topic_get_first_task_clear(c_topic &topic); ///< get the first task of topic (or NULL) but first remove all done tasks
 
 	void topic_add(tTaskPtr task) {
 		tTopicPtr topic = make_shared<c_topic>();
@@ -166,13 +172,13 @@ struct c_node : std::enable_shared_from_this<c_node> {
 
 	void receive_msg(const c_msg & msg); ///< place it in inbox
 
-	void react_message(const c_msg & msg); 
+	void react_message(const c_msg & msg);
 
 	c_topic& find_topic_for_task(const c_task &); ///< finds (or creates) proper Topic for such task
 
 	bool integrate_task(shared_ptr<c_task> new_task); ///< Adds this task to proper topic, unless it's not needed. Returns 1 if was in fact added
- 
-	
+
+
 };
 
 
@@ -184,7 +190,7 @@ void network_send(c_node &from, c_node &to, c_msg &msg) {
 
 // --- Node (continue) ----------------------------------------------
 
-c_node::c_node(char name, int price) 
+c_node::c_node(char name, int price)
 	: m_name(name),
 	m_node_prev(), m_node_next(),
 	m_price_route(price)
@@ -198,13 +204,13 @@ void c_node::draw() const {
 
 	if (prev) {
 		out << "<";
-		if (show_arrow_detail) out << prev->m_name; 
+		if (show_arrow_detail) out << prev->m_name;
 		out << "--";
 	}
 	out << "["<<m_name<<"]";
 	if (next) {
 		out << "--";
-		if (show_arrow_detail) out << next->m_name; 
+		if (show_arrow_detail) out << next->m_name;
 		out << ">";
 	}
 }
@@ -214,10 +220,10 @@ void c_node::print() const {
 	auto prev = m_node_prev.lock(); 	auto next = m_node_next.lock();
 
 	out << "--- " << m_name << " ---" << endl;
-	
+
 	out << "Prev: ";
 	if (prev) out << prev->m_name; else out << "(none)";
-	out << "\n";
+	out << " / ";
 
 	out << "Next: ";
 	if (next) out << next->m_name; else out << "(none)";
@@ -225,7 +231,7 @@ void c_node::print() const {
 
 	out << "Topics: ";
 	if (!mTopic.size()) out << "(none)" ; else {
-		for (const auto & objptr : mTopic) { 
+		for (const auto & objptr : mTopic) {
 			out << endl << "* " ;
 			objptr->print(out);
 		}
@@ -238,8 +244,8 @@ void c_node::print() const {
 
 //void ConnectPrev(tNodePtr other) { m_node_prev = other; }
 
-void c_node::connect_next(shared_ptr<c_node> other) { 
-	m_node_next = other; 
+void c_node::connect_next(shared_ptr<c_node> other) {
+	m_node_next = other;
 	other->m_node_prev = shared_from_this();
 }
 
@@ -261,7 +267,7 @@ void c_node::tick() { ///< Run a tick of the simulation
 		try {
 			react_message(*it);
 		}
-		catch (...) { 
+		catch (...) {
 			cerr << "\nThere was an exception during processing inbox msg!" << endl;
 		}
 		it = m_inbox.erase(it);
@@ -284,7 +290,7 @@ bool c_node::integrate_task(shared_ptr<c_task> new_task) {
 	bool contains_this_task=0;
 	for(const auto & t : topic.mTask) {
 		if ((*t) == (*new_task)) {  // check if has identical
-			contains_this_task=1; break; 
+			contains_this_task=1; break;
 		}
 	}
 	if (contains_this_task) return 0; // <--- ret - has identical
@@ -295,7 +301,7 @@ bool c_node::integrate_task(shared_ptr<c_task> new_task) {
 
 void c_node::react_message(const c_msg & msg) {
 	switch (msg.m_kind) {
-		case e_msg_task: // a message to create task 
+		case e_msg_task: // a message to create task
 		{
 		 	switch (msg.m_kind_task) {
 
@@ -309,7 +315,7 @@ void c_node::react_message(const c_msg & msg) {
 
 				default: { } break; // other values of msg.m_kind_task
 			} // switch msg.m_kind_task
-			
+
 		} break; // e_msg_task - the message type is some task
 		break;
 
@@ -318,12 +324,25 @@ void c_node::react_message(const c_msg & msg) {
 	// print(); cerr<<"^--- after reaction" << endl;
 }
 
-void c_node::topic_tick(c_topic &topic) { ///< tick for the selected topic
-	if (!topic.mTask.size()) return ; // nothing to do for this topic
-	
-	auto tasks_front = get_front(topic.mTask); // the first task of it - iterator
-	if (tasks_front->is_done())
+c_task* c_node::topic_get_first_task_clear(c_topic &topic) {
+	while (true) {
+		if (!topic.mTask.size()) return nullptr ; // <--- nothing to do for this topic it is empty (now)
 
+		auto task_it = get_begin_notempty( topic.mTask ); // the first task of it - iterator
+		if ( (*task_it)->is_done()) { // task is done
+			topic.mTask.erase(task_it); // erase it
+		} else {
+			return (*task_it).get(); // <-- return the task
+		}
+		// continue (e.g. after removing, try next task)
+	}
+}
+
+void c_node::topic_tick(c_topic &topic) { ///< tick for the selected topic
+	auto * task_rawptr = topic_get_first_task_clear(topic);
+	if (! task_rawptr) return ; // <--- this topic is empty after all
+
+	auto & task = *task_rawptr; // the first task object
 	auto prev = m_node_prev.lock(); 	auto next = m_node_next.lock();
 
 	switch (task.m_task_kind)  {
@@ -407,7 +426,7 @@ int main(int argc, const char** argv) {
 	// start tasks
 	nodes.at(0)->topic_add(make_shared<c_task>(e_task_ask_price,'Z'));
 
-	for (int i=0; i<5; ++i) { // main loop
+	for (int i=0; i<10; ++i) { // main loop
 		cout << endl << endl;
 		cout << "=== turn # " << i << endl;
 
@@ -416,7 +435,7 @@ int main(int argc, const char** argv) {
 		cout<<endl;
 		for (shared_ptr<c_node> &node_shared : nodes) node_shared->print();
 
-		if (opt_run_simple) { 
+		if (opt_run_simple) {
 			cout << endl << "It was SIMPLE run, ending" << endl;
 			return 0;
 		}
@@ -424,7 +443,7 @@ int main(int argc, const char** argv) {
 		// simulate world...
 		for (shared_ptr<c_node> &node_shared : nodes) node_shared->tick();
 
-		sleep_seconds(5.0);
+	//	sleep_seconds(5.0);
 
 	} // main loop
 
