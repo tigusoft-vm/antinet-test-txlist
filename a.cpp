@@ -1,5 +1,6 @@
 #include <iostream>
 #include <vector>
+#include <map>
 #include <memory>
 #include <chrono>
 #include <thread>
@@ -29,6 +30,17 @@ send packet
 using namespace std;
 
 using boost::any_cast;
+
+#if 0
+// a quick test
+
+int main() {
+
+}
+
+
+#else
+
 
 // nodes.at(0).AddTask(make_shared<cTask>(e_task_ask_price,'Z'));
 
@@ -68,13 +80,59 @@ typedef enum {
 
 } t_state;
 
+struct c_data_tag {
+	public:
+		std::string m_name;
+
+		c_data_tag() : m_name("x") { }
+		c_data_tag(const std::string &name) : m_name(name) { }
+		c_data_tag(const char* s) : m_name(s) { }
+
+		c_data_tag(const c_data_tag & org) : m_name(org.m_name) { }
+		c_data_tag(c_data_tag && org) : m_name(std::move(org.m_name)) { }  //  { m_name = std::move(org.m_name)    or (almost the same)   std::swap(m_name, org.m_name)  // XXX
+
+		bool operator<(const c_data_tag & other) { return (*this).m_name < other.m_name; }
+		bool operator==(const c_data_tag & other) { return (*this).m_name == other.m_name; }
+
+		// operator string() const { return m_name; }
+};
+
+ostream& operator<<(ostream& oss, const c_data_tag & obj) {
+	oss << obj.m_name;
+	return oss;
+}
+
+
+/***
+ * @brief This is container of data elements that are indexed by name (e.g. key is: c_data_tag keys), 
+ * and the values are casted/converted on read. Any data can be written, as in boost::any
+ */
+class c_data_named {
+	public:
+
+	  /***
+	   * @brief This reads the data, the data must already exist and must be of the specified type (as with boost::any_cast)
+	   */
+		template<typename T> T & read_data<T>(const c_data_tag & tag) const { 
+			try {
+				std::boost & any_data = m_data_extra.at(tag);
+				try {
+					return any_cast<T>(any_data);
+				}
+				catch(std::bad_any_cast) { cerr << "Invalid access to data, under tag=[" << tag << "]" << " as type: " << typeid(T).name() << " - the element if of other type: " << any_data.type().name() << endl; throw ; }
+			}
+			catch(std::out_of_range) { cerr << "Invalid access to data, under tag=[" << tag << "]" << " as type: " << typeid(T).name() << " - the element does not exist with this key." << endl; throw ; }
+			catch(...) { cerr << "Invalid access to data, under tag=[" << tag << "]" << " as type: " << typeid(T).name() << " - OTHER ERROR." << endl; throw ; }
+		}
+}
+
 class c_task;
 class c_task {
 	public:
-
 		t_task m_task_kind; ///< current task
 		t_state m_state; ///<  state of this task
-		char m_name1; ///< one of paramters for the task
+
+		map< c_data_tag , boost::any > m_data_extra; // extra, named data
 
 		c_task(t_task kind, char name1);
 
@@ -82,26 +140,30 @@ class c_task {
 
 		bool operator==(const c_task & other) const;
 		bool is_done() const { return m_state == e_state_done; }
+
 };
 typedef shared_ptr<c_task> tTaskPtr; ///< some pointer to task
 
 bool c_task::operator==(const c_task & other) const {
-	return (this->m_task_kind == other.m_task_kind)
-	 && (this->m_name1 == other.m_name1);
+	if (! (this->m_task_kind == other.m_task_kind)) return false;
+	if (this->m_data != other.m_data) return false;
+	if (this->m_data_extra != other.m_data_extra) return false;
+	return true;
 }
+
 
 void c_task::print(ostream &out) const {
 	out << "{";
 	switch (m_task_kind)  {
-		case e_task_ask_price: out << "ask price route-to-" << m_name1; break;
-		case e_task_tell_price: out << "tell price route-to" << m_name1; break;
+		case e_task_ask_price: out << "ask price route-to-" << any_cast<string>(m_data_extra.at("dst")) ; break;
+		case e_task_tell_price: out << "tell price route-to" << m_data_extra.at("dst"); break;
 		default: out << "(invalid)";
 	}
 	out << "}";
 }
 
-c_task::c_task(t_task kind, char name1)
-: m_task_kind(kind), m_state(e_state_todo), m_name1(name1) { }
+c_task::c_task(t_task kind)
+: m_task_kind(kind), m_state(e_state_todo) { }
 
 
 // ==================================================================
@@ -135,7 +197,8 @@ typedef enum {
 struct c_msg {
 	t_msg m_kind;
 	t_task m_kind_task;
-	vector< boost::any > m_data;
+	vector< boost::any > m_data; // basic data
+	map< c_data_tag , boost::any > m_data_extra; // extra, named data
 };
 
 // === Node =========================================================
@@ -178,8 +241,17 @@ struct c_node : std::enable_shared_from_this<c_node> {
 
 	bool integrate_task(shared_ptr<c_task> new_task); ///< Adds this task to proper topic, unless it's not needed. Returns 1 if was in fact added
 
-
+	void print(std::ostream & oss) const;
 };
+
+ostream& operator<<(ostream& oss, const c_node & obj) {
+	obj.print(oss);
+	return oss;
+}
+
+void c_node::print(std::ostream & oss) const {
+	oss << "(NODE at "<<this<<") " << m_name ;
+}
 
 
 // === Network ======================================================
@@ -346,10 +418,13 @@ void c_node::topic_tick(c_topic &topic) { ///< tick for the selected topic
 	auto prev = m_node_prev.lock(); 	auto next = m_node_next.lock();
 
 	switch (task.m_task_kind)  {
-		case e_task_ask_price: {
-			auto & goal_name = task.m_name1;
-			if (goal_name == m_name) { // I'm the goal of this question cool
+		case e_task_ask_price: { // the ask is to find the price
+			auto & goal_name = task.m_data_extra.at("dst");
+			cerr<<"\n*** asking price, goal_name="<<goal_name<<endl;
+			if (goal_name == m_name) { // I'm the goal of this question! cool
+				/*
 				if (prev) { // we have the node who asked us so we can reply to them
+					cerr<<"\n*** replied to prev="<<(*prev)<<endl;
 					c_msg msg;
 					msg.m_kind = e_msg_task;
 					msg.m_kind_task = e_task_tell_price; // we are sending REPLY
@@ -360,13 +435,21 @@ void c_node::topic_tick(c_topic &topic) { ///< tick for the selected topic
 				else {
 					cerr<<"\n*** Protocol warning: we got a request, but no prev node to reply to***\n";
 				}
+				*/
+				auto new_task = make_shared<c_task>(
+					e_task_ask_price, // it is our task to find out the price
+					any_cast<char>( msg.m_data.at(0) )
+				);
+				integrate_task( new_task ); // add the task
+
 			}
 			else { // I'm not the goal
 				if (next) { // we have next node to ask
+					cerr<<"\nforwardnig to next="<<(*next)<<endl;
 					c_msg msg;
 					msg.m_kind = e_msg_task;
 					msg.m_kind_task = e_task_ask_price;
-					msg.m_data.push_back( char(task.m_name1) ); // data with name
+					msg.m_data.push_back( char(task.m_data_extra.at("dst")) ); // data with name
 					next->receive_msg(msg); // <--- ask them
 					task.m_state = e_state_done;
 				} // ask other node
@@ -378,6 +461,7 @@ void c_node::topic_tick(c_topic &topic) { ///< tick for the selected topic
 		} break; // task e_task_ask_price
 
 		case e_task_tell_price: {
+			cerr<<"\n *** *** tell the price..." << endl;
 		} break;
 	}
 }
@@ -394,6 +478,8 @@ void clear_screen() {
 };
 
 void sleep_seconds(double ms) {
+	cout<<std::flush;
+	cerr<<std::flush;
 	std::this_thread::sleep_for( std::chrono::milliseconds( (long int)(ms*1000)  ) );
 }
 
@@ -407,6 +493,8 @@ int main(int argc, const char** argv) {
 	}
 
 	if (opt_run_simple) clear_screen(); // goes well with loop.sh
+
+	int the_delay = -1;  // the delay, in ms, or -1 to wait for ENTER
 
 	cout << "=== START ====================================" << endl;
 	vector<shared_ptr<c_node>> nodes; // the world
@@ -426,7 +514,7 @@ int main(int argc, const char** argv) {
 	// start tasks
 	nodes.at(0)->topic_add(make_shared<c_task>(e_task_ask_price,'Z'));
 
-	for (int i=0; i<10; ++i) { // main loop
+	for (int i=0; i<100; ++i) { // main loop
 		cout << endl << endl;
 		cout << "=== turn # " << i << endl;
 
@@ -443,12 +531,16 @@ int main(int argc, const char** argv) {
 		// simulate world...
 		for (shared_ptr<c_node> &node_shared : nodes) node_shared->tick();
 
-	//	sleep_seconds(5.0);
-
+		if (the_delay==0) ;
+		else if (the_delay==-1) { cout<<"Press ENTER"<<endl; string nothing; getline(cin, nothing); }
+		else if (the_delay>0) sleep_seconds(the_delay / 1000.);
+		else assert(0);
 	} // main loop
 
 
 	cout << endl << "END" << endl;
 
 }
+
+#endif
 
