@@ -28,16 +28,26 @@ send packet
 */
 
 using namespace std;
-
 using boost::any_cast;
 
-#if 0
+#if 1
 // a quick test
 
+
+struct foo {
+	std::vector<T> m;
+
+	void write_data(T data) {
+		m.push_back(data);
+	}
+};
+
 int main() {
+	boost::any foo;
+	foo = (double) 42.42;
 
+	int i = any_cast<double>( foo );
 }
-
 
 #else
 
@@ -109,13 +119,46 @@ ostream& operator<<(ostream& oss, const c_data_tag & obj) {
  */
 class c_data_named {
 	public:
+		map< c_data_tag , boost::any > m_container; // the data
 
 	  /***
 	   * @brief This reads the data, the data must already exist and must be of the specified type (as with boost::any_cast)
 	   */
-		template<typename T> T & read_data<T>(const c_data_tag & tag) const { 
+		template<typename T> T & read_data(const c_data_tag & tag) const { 
 			try {
-				std::boost & any_data = m_data_extra.at(tag);
+				std::boost & any_data = m_container.at(tag);
+				try {
+					return any_cast<T>(any_data);
+				}
+				catch(std::bad_any_cast) { cerr << "Invalid access to data, under tag=[" << tag << "]" << " as type: " << typeid(T).name() << " - the element if of other type: " << any_data.type().name() << endl; throw ; }
+			}
+			catch(std::out_of_range) { cerr << "Invalid access to data, under tag=[" << tag << "]" << " as type: " << typeid(T).name() << " - the element does not exist with this key." << endl; throw ; }
+			catch(...) { cerr << "Invalid access to data, under tag=[" << tag << "]" << " as type: " << typeid(T).name() << " - OTHER ERROR." << endl; throw ; }
+		}
+
+
+		{
+			auto big = ...;
+			x.write_data(big);
+			big.bar();
+
+			auto big = ...;
+			x.write_data(std::move(big));
+
+		}
+
+	  /***
+	   * @brief This writes (sets) the data, it must be same type as before unless allow_change_type==true
+	   * @return Says if it was an update of already existing entry (true) - else it was a creation of new object
+	   */
+		template<typename T> bool write_data(const c_data_tag & tag, T data, bool allow_change_type=false) const { 
+			try {
+				auto iter = m_container.find(tag);
+				if (iter == m_container.end()) { // this tag does not exist yet
+					m_container.emplace_back(tag, std::move(data));
+				}
+
+				std::boost & any_data = m_container.at(tag);
 				try {
 					return any_cast<T>(any_data);
 				}
@@ -132,7 +175,7 @@ class c_task {
 		t_task m_task_kind; ///< current task
 		t_state m_state; ///<  state of this task
 
-		map< c_data_tag , boost::any > m_data_extra; // extra, named data
+		c_data_named m_data_extra;
 
 		c_task(t_task kind, char name1);
 
