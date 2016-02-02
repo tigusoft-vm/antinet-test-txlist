@@ -24,29 +24,19 @@ send packet
                         50+10
     done <------------ todo
 
+e_task_ask_price   ( "dst"="Z" , ["buyer"="B" === msg.from] , ["seller"="C" === msg.to  ] )
+e_task_tell_price  ( "dst"="Z" , ["buyer"="B" === msg.to  ] , ["seller"="C" === msg.from] )
 
 */
 
 using namespace std;
 using boost::any_cast;
 
-#if 1
+#if 0
 // a quick test
-
-
 struct foo {
-	std::vector<T> m;
-
-	void write_data(T data) {
-		m.push_back(data);
-	}
-};
 
 int main() {
-	boost::any foo;
-	foo = (double) 42.42;
-
-	int i = any_cast<double>( foo );
 }
 
 #else
@@ -81,10 +71,6 @@ typedef enum {
 
 	// for e_task_ask_price:
 	// todo - task will be sent
-	e_state_ask_price_STATE_wait, ///< now waiting for reply
-	// done
-
-	// for e_task_tell_price:
 	// todo
 	// done
 
@@ -117,57 +103,123 @@ ostream& operator<<(ostream& oss, const c_data_tag & obj) {
  * @brief This is container of data elements that are indexed by name (e.g. key is: c_data_tag keys), 
  * and the values are casted/converted on read. Any data can be written, as in boost::any
  */
-class c_data_named {
-	public:
-		map< c_data_tag , boost::any > m_container; // the data
+template <typename TKey>
+class map_of_any {
+	private:
+		typedef map< TKey , boost::any > t_container; ///< type of the data 
+		t_container m_container; ///< the data
 
+	public:
+	
+		bool operator==( const map_of_any<TKey> & other) const {
+			return m_container == other.m_container;
+		}
+		bool operator!=( const map_of_any<TKey> & other) const {
+			return ! ( *this == other );
+		}
+		
 	  /***
 	   * @brief This reads the data, the data must already exist and must be of the specified type (as with boost::any_cast)
 	   */
-		template<typename T> T & read_data(const c_data_tag & tag) const { 
+		template<typename T> const T & read_data(const TKey & tag) const { 
 			try {
-				std::boost & any_data = m_container.at(tag);
+				const boost::any * any_data = & m_container.at(tag);
+				cout << __LINE__ << " " << any_cast<T>(& m_container.at(tag)) << endl;
 				try {
-					return any_cast<T>(any_data);
+					return * any_cast<T>(any_data);
 				}
-				catch(std::bad_any_cast) { cerr << "Invalid access to data, under tag=[" << tag << "]" << " as type: " << typeid(T).name() << " - the element if of other type: " << any_data.type().name() << endl; throw ; }
+				catch(boost::bad_any_cast) { cerr << "Can not use data from tag=["<<tag<<"]" << " as " << typeid(T).name() << " because it has type: " << any_data->type().name() << endl; throw ; }
 			}
-			catch(std::out_of_range) { cerr << "Invalid access to data, under tag=[" << tag << "]" << " as type: " << typeid(T).name() << " - the element does not exist with this key." << endl; throw ; }
-			catch(...) { cerr << "Invalid access to data, under tag=[" << tag << "]" << " as type: " << typeid(T).name() << " - OTHER ERROR." << endl; throw ; }
-		}
-
-
-		{
-			auto big = ...;
-			x.write_data(big);
-			big.bar();
-
-			auto big = ...;
-			x.write_data(std::move(big));
-
+			catch(std::out_of_range) { cerr << "Can not use data from tag=["<<tag<<"]" << " as " << typeid(T).name() << " because the key does not exist." << endl; throw ; }
 		}
 
 	  /***
 	   * @brief This writes (sets) the data, it must be same type as before unless allow_change_type==true
 	   * @return Says if it was an update of already existing entry (true) - else it was a creation of new object
 	   */
-		template<typename T> bool write_data(const c_data_tag & tag, T data, bool allow_change_type=false) const { 
-			try {
-				auto iter = m_container.find(tag);
-				if (iter == m_container.end()) { // this tag does not exist yet
-					m_container.emplace_back(tag, std::move(data));
-				}
-
-				std::boost & any_data = m_container.at(tag);
-				try {
-					return any_cast<T>(any_data);
-				}
-				catch(std::bad_any_cast) { cerr << "Invalid access to data, under tag=[" << tag << "]" << " as type: " << typeid(T).name() << " - the element if of other type: " << any_data.type().name() << endl; throw ; }
+		template<typename T> bool write_data(const TKey & tag, T && data, bool allow_change_type=false) { // opti-todo(&&)
+			auto result = m_container.emplace(tag, std::forward<T>(data));
+			if (result.second) return false; // new element inserted
+			// else - already exists, need to overwrite value:
+			const auto found = result.first;
+			boost::any & found_any = found->second;
+			if (found_any.type() == typeid(data)) { // same type
+				found_any = data; // replace the data in found element
+			} else { // other type then previously
+				if (allow_change_type) { found_any = data; } // overwrite and change type
+				else throw boost::bad_any_cast(); // "Tried to change the type of object by overwritting it, while it was not allowed.");
 			}
-			catch(std::out_of_range) { cerr << "Invalid access to data, under tag=[" << tag << "]" << " as type: " << typeid(T).name() << " - the element does not exist with this key." << endl; throw ; }
-			catch(...) { cerr << "Invalid access to data, under tag=[" << tag << "]" << " as type: " << typeid(T).name() << " - OTHER ERROR." << endl; throw ; }
+			return true; // updated
 		}
+};
+
+typedef map_of_any<c_data_tag> c_data_named; ///< map of named (e.g. string-like) variables (of any any).
+
+using namespace std;
+
+/*
+typedef string dom;
+
+struct miasto { 
+	dom a,b;
+
+	dom front() { return a; } // a - lv
+	dom forme() { return a+"ale inny"; } // RVO   expression is rvalue
+
+	const dom & front2() { return a; } // lv
+};
+
+int main() {
+	{
+		miasto krk;
+
+		dom best = krk.front();
+
+		const & best = krk.front();
+		krk.przebuduj();
+		best.draw(); // !!!
+
+
+		krk.front().draw();
+
+		grafika.draw( krk.front() ); // ?
+		grafika.draw( krk , krk.front() ); // ?
+
+	}
 }
+*/
+
+int main() { 
+	{
+		std::unique_ptr<map_of_any<string>> map( new map_of_any<string>() );
+		int a=50;
+		const int b=100;
+		map->write_data("foo", 42);
+		map->write_data("foo", 42+10);
+		map->write_data("bar", a);
+		map->write_data("bar", b);
+		std::cout << map->read_data<int>("foo") << std::endl;
+
+
+
+		const int & foo = map->read_data<int>("foo"); 
+		cout << __LINE__ << " got it as " << & foo << endl;
+		// ^-- if would be returned by a value, then this would be a tricky way to accept the result, do NOT do it (std 8.3.5: lifetime of temporary value will be prolonged when stored into local const)
+
+		std::cout << foo << std::endl;
+		int foo2 = map->read_data<int>("bar");
+		std::cout << foo << " " << foo2 << std::endl;
+		//= map.reset(nullptr);
+		//tab.at(0); // map->read_data<int>("foo");
+//		tab.push_back()...
+//		foo ....
+
+
+
+	}
+}
+
+#if 0
 
 class c_task;
 class c_task {
@@ -175,9 +227,9 @@ class c_task {
 		t_task m_task_kind; ///< current task
 		t_state m_state; ///<  state of this task
 
-		c_data_named m_data_extra;
+		c_data_named m_data; ///< the data, accessible by tags
 
-		c_task(t_task kind, char name1);
+		c_task(t_task kind);
 
 		void print(ostream &out) const;
 
@@ -190,16 +242,14 @@ typedef shared_ptr<c_task> tTaskPtr; ///< some pointer to task
 bool c_task::operator==(const c_task & other) const {
 	if (! (this->m_task_kind == other.m_task_kind)) return false;
 	if (this->m_data != other.m_data) return false;
-	if (this->m_data_extra != other.m_data_extra) return false;
 	return true;
 }
-
 
 void c_task::print(ostream &out) const {
 	out << "{";
 	switch (m_task_kind)  {
-		case e_task_ask_price: out << "ask price route-to-" << any_cast<string>(m_data_extra.at("dst")) ; break;
-		case e_task_tell_price: out << "tell price route-to" << m_data_extra.at("dst"); break;
+		case e_task_ask_price: out << "ask price route-to-" << m_data.read_data<string>("dst") ; break;
+		case e_task_tell_price: out << "tell price route-to" << m_data.read_data<string>("dst") ; break;
 		default: out << "(invalid)";
 	}
 	out << "}";
@@ -239,9 +289,7 @@ typedef enum {
 
 struct c_msg {
 	t_msg m_kind;
-	t_task m_kind_task;
-	vector< boost::any > m_data; // basic data
-	map< c_data_tag , boost::any > m_data_extra; // extra, named data
+	c_data_named m_data; ///< data of this request, often includes the task
 };
 
 // === Node =========================================================
@@ -250,7 +298,8 @@ struct c_node;
 typedef shared_ptr<c_node> tNodePtr; ///< some pointer to other nodes
 
 struct c_node : std::enable_shared_from_this<c_node> {
-	char m_name;
+	typedef string t_name;
+	t_name m_name; ///< the name of the node (e.g. ID of node)
 
 	weak_ptr<c_node> m_node_prev;
 	weak_ptr<c_node> m_node_next;
@@ -306,7 +355,7 @@ void network_send(c_node &from, c_node &to, c_msg &msg) {
 // --- Node (continue) ----------------------------------------------
 
 c_node::c_node(char name, int price)
-	: m_name(name),
+	: m_name( string("") + name),
 	m_node_prev(), m_node_next(),
 	m_price_route(price)
 { }
@@ -418,6 +467,8 @@ void c_node::react_message(const c_msg & msg) {
 	switch (msg.m_kind) {
 		case e_msg_task: // a message to create task
 		{
+			const	c_task & = msg.get_data<c_task>("task");
+
 		 	switch (msg.m_kind_task) {
 
 				case e_task_ask_price: {
@@ -461,8 +512,9 @@ void c_node::topic_tick(c_topic &topic) { ///< tick for the selected topic
 	auto prev = m_node_prev.lock(); 	auto next = m_node_next.lock();
 
 	switch (task.m_task_kind)  {
-		case e_task_ask_price: { // the ask is to find the price
-			auto & goal_name = task.m_data_extra.at("dst");
+
+		case e_task_ask_price: { // the request is to find the price
+			auto & goal_name = task.m_data.read_data<string>("dst");
 			cerr<<"\n*** asking price, goal_name="<<goal_name<<endl;
 			if (goal_name == m_name) { // I'm the goal of this question! cool
 				/*
@@ -479,10 +531,7 @@ void c_node::topic_tick(c_topic &topic) { ///< tick for the selected topic
 					cerr<<"\n*** Protocol warning: we got a request, but no prev node to reply to***\n";
 				}
 				*/
-				auto new_task = make_shared<c_task>(
-					e_task_ask_price, // it is our task to find out the price
-					any_cast<char>( msg.m_data.at(0) )
-				);
+				auto new_task = make_shared<c_task>( e_task_tell_price, task.m_data.read_data<string>("dst") );
 				integrate_task( new_task ); // add the task
 
 			}
@@ -584,6 +633,8 @@ int main(int argc, const char** argv) {
 	cout << endl << "END" << endl;
 
 }
+
+#endif
 
 #endif
 
